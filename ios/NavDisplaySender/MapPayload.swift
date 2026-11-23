@@ -15,19 +15,19 @@ extension Data {
     mutating func append(u8 v: UInt8) { append(contentsOf: [v]) }
     mutating func append(u16 v: UInt16) {
         var x = v.littleEndian
-        withUnsafeBytes(of: &x) { append(contentsOf: $0) }
+        Swift.withUnsafeBytes(of: &x) { append(contentsOf: $0) }
     }
     mutating func append(u32 v: UInt32) {
         var x = v.littleEndian
-        withUnsafeBytes(of: &x) { append(contentsOf: $0) }
+        Swift.withUnsafeBytes(of: &x) { append(contentsOf: $0) }
     }
     mutating func append(i16 v: Int16) {
         var x = v.littleEndian
-        withUnsafeBytes(of: &x) { append(contentsOf: $0) }
+        Swift.withUnsafeBytes(of: &x) { append(contentsOf: $0) }
     }
     mutating func append(i32 v: Int32) {
         var x = v.littleEndian
-        withUnsafeBytes(of: &x) { append(contentsOf: $0) }
+        Swift.withUnsafeBytes(of: &x) { append(contentsOf: $0) }
     }
 }
 
