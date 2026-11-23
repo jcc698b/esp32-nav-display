@@ -15,6 +15,7 @@ workflows:
       - name: Build (no code signing)
         script: |
           cd ios
+          set +e
           xcodebuild \
             -project NavDisplaySender.xcodeproj \
             -target NavDisplaySender \
@@ -25,7 +26,14 @@ workflows:
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY="" \
-            build
+            build > build.log 2>&1
+          status=$?
+          echo "=========== build errors ==========="
+          grep -n "error:" build.log | head -40 || true
+          echo "=========== last 20 lines =========="
+          tail -20 build.log
+          echo "===================================="
+          exit $status
 
       - name: Package unsigned IPA
         script: |
