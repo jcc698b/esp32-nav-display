@@ -20,8 +20,8 @@ workflows:
             -target NavDisplaySender \
             -configuration Release \
             -sdk iphoneos \
-            -destination 'generic/platform=iOS' \
-            -derivedDataPath build \
+            SYMROOT="$PWD/build" \
+            OBJROOT="$PWD/build" \
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY="" \
@@ -30,8 +30,10 @@ workflows:
       - name: Package unsigned IPA
         script: |
           cd ios
+          APP="build/Release-iphoneos/NavDisplaySender.app"
+          test -d "$APP"
           mkdir -p out/Payload
-          cp -R build/Build/Products/Release-iphoneos/NavDisplaySender.app out/Payload/
+          cp -R "$APP" out/Payload/
           cd out
           zip -qry NavDisplaySender-unsigned.ipa Payload
           ls -lh NavDisplaySender-unsigned.ipa
