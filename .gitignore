@@ -1,0 +1,28 @@
+# PlatformIO
+.pio/
+.pioenvs/
+.piolibdeps/
+
+# Arduino
+*.bin
+*.elf
+*.map
+
+# Xcode
+ios/*.xcodeproj/
+ios/*.xcworkspace/
+ios/build/
+ios/out/
+ios/DerivedData/
+*.xcuserstate
+xcuserdata/
+
+# macOS
+.DS_Store
+
+# Python
+__pycache__/
+*.pyc
+
+# 本地工具链
+.tools/

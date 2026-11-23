@@ -1,0 +1,104 @@
+name: Build iOS IPA (unsigned)
+
+# 没有 Mac 也能拿到可安装的 IPA：
+#   1. 把整个项目推到 GitHub（私有仓库也行）
+#   2. Actions → Build iOS IPA (unsigned) → Run workflow
+#   3. 跑完在 Artifacts 里下载 NavDisplaySender-unsigned-ipa
+#   4. 用 Sideloadly 在 Windows 上签名安装（见 docs/install-iphone.md）
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "ios/**"
+      - ".github/workflows/build-ios-ipa.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: macos-14
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Show Xcode version
+        run: xcodebuild -version
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Generate Xcode project
+        working-directory: ios
+        run: xcodegen generate
+
+      - name: Build (no code signing)
+        working-directory: ios
+        run: |
+          set -o pipefail
+          xcodebuild \
+            -project NavDisplaySender.xcodeproj \
+            -target NavDisplaySender \
+            -configuration Release \
+            -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            build 2>&1 | tee build.log
+
+      - name: Package unsigned IPA
+        working-directory: ios
+        run: |
+          set -e
+          APP="build/Build/Products/Release-iphoneos/NavDisplaySender.app"
+          test -d "$APP"
+          mkdir -p out/Payload
+          cp -R "$APP" out/Payload/
+          cd out
+          zip -qry NavDisplaySender-unsigned.ipa Payload
+          ls -lh NavDisplaySender-unsigned.ipa
+
+      - name: Upload IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: NavDisplaySender-unsigned-ipa
+          path: ios/out/NavDisplaySender-unsigned.ipa
+          if-no-files-found: error
+
+      # 把 IPA 推到一个独立的 ipa 分支，方便直接 raw 下载（artifact 下载在国内常被墙）
+      - name: Publish IPA branch
+        working-directory: ios/out
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          git init -q
+          git checkout -q -b ipa
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add NavDisplaySender-unsigned.ipa
+          git commit -q -m "ipa build ${GITHUB_RUN_NUMBER}"
+          git push -f "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" ipa:ipa
+
+      # 编译失败时把日志推到 ipa-log 分支，方便远程排查
+      - name: Publish build log on failure
+        if: failure()
+        working-directory: ios
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          [ -f build.log ] || echo "no build.log captured" > build.log
+          mkdir -p /tmp/ipalog
+          cp build.log /tmp/ipalog/
+          cd /tmp/ipalog
+          git init -q
+          git checkout -q -b ipa-log
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add build.log
+          git commit -q -m "build log ${GITHUB_RUN_NUMBER}"
+          git push -f "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" ipa-log:ipa-log
