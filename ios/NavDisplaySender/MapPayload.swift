@@ -33,7 +33,7 @@ extension Data {
 
 enum MapFrame {
     static let unitMeters = 2          // 1 个单位 = 2 米
-    static let maxBlob = 24 * 1024     // 固件缓冲 24576
+    static let maxBlob = 32 * 1024     // 固件缓冲 32768
 
     /// 把 blob 拆成 BLE 帧
     static func frames(blob: Data, lineCount: Int, ref: CLLocationCoordinate2D) -> [Data] {
@@ -127,41 +127,35 @@ enum MapBlob {
         }
         roadLines.sort { $0.0 > $1.0 }
 
-        var totalPoints = routeLines.reduce(0) { $0 + $1.count }
-        var kept: [(UInt8, [(Double, Double)])] = []
-        for line in roadLines {
-            if kept.count >= 1200 || totalPoints + line.1.count > 5000 { continue }
-            totalPoints += line.1.count
-            kept.append(line)
-        }
-        guard !routeLines.isEmpty || !kept.isEmpty else { return (Data(), 0) }
-
         var blob = Data()
-        let lineCount = routeLines.count + kept.count
-        blob.append(u16: UInt16(lineCount))
+        blob.append(u16: 0)                 // 行数先占位
+        var lineCount = 0
 
-        func encode(_ kind: UInt8, _ pts: [(Double, Double)]) {
+        func appendLine(_ kind: UInt8, _ pts: [(Double, Double)]) {
             guard pts.count >= 2, pts.count <= 65535 else { return }
-            blob.append(u8: kind)
-            blob.append(u16: UInt16(pts.count))
+            var line = Data()
+            line.append(u8: kind)
+            line.append(u16: UInt16(pts.count))
             for p in pts {
                 let ux = Int16(clamping: Int((p.0 / Double(MapFrame.unitMeters)).rounded()))
                 let uy = Int16(clamping: Int((p.1 / Double(MapFrame.unitMeters)).rounded()))
-                blob.append(i16: ux)
-                blob.append(i16: uy)
+                line.append(i16: ux)
+                line.append(i16: uy)
+            }
+            // 放得下才加，避免最后整包回退成“只有路线”
+            if blob.count + line.count <= MapFrame.maxBlob {
+                blob.append(line)
+                lineCount += 1
             }
         }
 
-        for line in routeLines { encode(3, line) }
-        for line in kept { encode(line.0, line.1) }
+        // 路线优先，其次按道路等级从高到低填
+        for line in routeLines { appendLine(3, line) }
+        for line in roadLines { appendLine(line.0, line.1) }
 
-        if blob.count > MapFrame.maxBlob {
-            // 超出固件缓冲就只留路线
-            blob = Data()
-            blob.append(u16: UInt16(routeLines.count))
-            for line in routeLines { encode(3, line) }
-            return (blob, routeLines.count)
-        }
+        guard lineCount > 0 else { return (Data(), 0) }
+        blob.replaceSubrange(0..<2,
+                             with: Data([UInt8(lineCount & 0xff), UInt8((lineCount >> 8) & 0xff)]))
         return (blob, lineCount)
     }
 
