@@ -258,46 +258,48 @@ final class OSMBasemap {
         let e = q.longitude + dLon
 
         let query = """
-        [out:json][timeout:20];way["highway"~"^(motorway|trunk|primary|secondary|tertiary|unclassified|residential|living_street)$"](\(s),\(w),\(n),\(e));out tags geom;
+        [out:json][timeout:8];way["highway"~"^(motorway|trunk|primary|secondary|tertiary|unclassified|residential|living_street)$"](\(s),\(w),\(n),\(e));out tags geom;
         """
-
-        var req = URLRequest(url: URL(string: "https://overpass-api.de/api/interpreter")!)
-        req.httpMethod = "POST"
-        req.timeoutInterval = 25
-        req.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
-        req.setValue("NavDisplay/1.0", forHTTPHeaderField: "User-Agent")
         let body = "data=" + (query.addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? "")
-        req.httpBody = body.data(using: .utf8)
 
-        URLSession.shared.dataTask(with: req) { [weak self] data, _, _ in
-            guard let self else { return }
+        // Overpass 主站国内经常连不上，按顺序换镜像（osm.ch 实测最快）
+        let endpoints = [
+            "https://overpass.osm.ch/api/interpreter",
+            "https://overpass.kumi.systems/api/interpreter",
+            "https://overpass-api.de/api/interpreter",
+        ]
+
+        func parse(_ data: Data?) -> [OSMRoad] {
+            guard let data,
+                  let obj = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
+                  let elements = obj["elements"] as? [[String: Any]] else { return [] }
             var roads: [OSMRoad] = []
-            if let data,
-               let obj = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
-               let elements = obj["elements"] as? [[String: Any]] {
-                roads.reserveCapacity(min(elements.count, 3000))
-                for el in elements.prefix(3000) {
-                    guard let tags = el["tags"] as? [String: String],
-                          let hw = tags["highway"],
-                          let geo = el["geometry"] as? [[String: Any]] else { continue }
-                    let kind: UInt8
-                    if hw == "motorway" || hw == "trunk" || hw == "primary" {
-                        kind = 2
-                    } else if hw == "secondary" {
-                        kind = 1
-                    } else {
-                        kind = 0
-                    }
-                    var pts: [CLLocationCoordinate2D] = []
-                    pts.reserveCapacity(geo.count)
-                    for g in geo {
-                        if let lat = g["lat"] as? Double, let lon = g["lon"] as? Double {
-                            pts.append(CLLocationCoordinate2D(latitude: lat, longitude: lon))
-                        }
-                    }
-                    if pts.count >= 2 { roads.append(OSMRoad(kind: kind, points: pts)) }
+            roads.reserveCapacity(min(elements.count, 3000))
+            for el in elements.prefix(3000) {
+                guard let tags = el["tags"] as? [String: String],
+                      let hw = tags["highway"],
+                      let geo = el["geometry"] as? [[String: Any]] else { continue }
+                let kind: UInt8
+                if hw == "motorway" || hw == "trunk" || hw == "primary" {
+                    kind = 2
+                } else if hw == "secondary" {
+                    kind = 1
+                } else {
+                    kind = 0
                 }
+                var pts: [CLLocationCoordinate2D] = []
+                pts.reserveCapacity(geo.count)
+                for g in geo {
+                    if let lat = g["lat"] as? Double, let lon = g["lon"] as? Double {
+                        pts.append(CLLocationCoordinate2D(latitude: lat, longitude: lon))
+                    }
+                }
+                if pts.count >= 2 { roads.append(OSMRoad(kind: kind, points: pts)) }
             }
+            return roads
+        }
+
+        func finish(_ roads: [OSMRoad]) {
             DispatchQueue.main.async {
                 self.inFlight = false
                 if !roads.isEmpty {
@@ -310,7 +312,26 @@ final class OSMBasemap {
                 }
                 completion(roads)
             }
-        }.resume()
+        }
+
+        func attempt(_ i: Int) {
+            guard i < endpoints.count else { finish([]); return }
+            var req = URLRequest(url: URL(string: endpoints[i])!)
+            req.httpMethod = "POST"
+            req.timeoutInterval = 12
+            req.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
+            req.setValue("NavDisplay/1.0", forHTTPHeaderField: "User-Agent")
+            req.httpBody = body.data(using: .utf8)
+            URLSession.shared.dataTask(with: req) { data, _, _ in
+                let roads = parse(data)
+                if roads.isEmpty {
+                    attempt(i + 1)
+                } else {
+                    finish(roads)
+                }
+            }.resume()
+        }
+        attempt(0)
     }
 }
 
